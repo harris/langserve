@@ -23,7 +23,7 @@ from typing import (
 from fastapi import HTTPException, Request
 from langchain.callbacks.tracers.log_stream import RunLogPatch
 from langchain.load.serializable import Serializable
-from langchain.schema.runnable import Runnable
+from langchain.schema.runnable import Runnable, RunnableConfig
 from langchain.schema.runnable.config import merge_configs
 from typing_extensions import Annotated
 
@@ -297,6 +297,11 @@ def add_routes(
     InvokeResponse = create_invoke_response_model(model_namespace, output_type_)
     BatchResponse = create_batch_response_model(model_namespace, output_type_)
 
+    async def _get_input(request: Request, config: RunnableConfig) -> Any:
+        """Get the input from the request."""
+        body = await request.json()
+        return runnable.with_config(config).input_schema(**body["input"])
+
     @app.post(
         namespace + "/c/{config_hash}/invoke",
         response_model=InvokeResponse,
@@ -316,7 +321,7 @@ def add_routes(
         )
         _add_tracing_info_to_metadata(config, request)
         output = await runnable.ainvoke(
-            _unpack_input(invoke_request.input), config=config
+            _unpack_input(await _get_input(request, config)), config=config
         )
 
         return InvokeResponse(output=simple_dumpd(output))
@@ -348,7 +353,11 @@ def add_routes(
                 config_hash, batch_request.config, keys=config_keys, model=ConfigPayload
             )
             _add_tracing_info_to_metadata(config, request)
-        inputs = [_unpack_input(input_) for input_ in batch_request.inputs]
+        body = await request.json()
+        inputs = [
+            _unpack_input(runnable.with_config(config).input_schema(input_))
+            for input_ in body["inputs"]
+        ]
         output = await runnable.abatch(inputs, config=config)
 
         return BatchResponse(output=simple_dumpd(output))
@@ -394,10 +403,10 @@ def add_routes(
         # Request is first validated using InvokeRequest which takes into account
         # config_keys as well as input_type.
         # After validation, the input is loaded using LangChain's load function.
-        input_ = _unpack_input(stream_request.input)
         config = _unpack_config(
             config_hash, stream_request.config, keys=config_keys, model=ConfigPayload
         )
+        input_ = _unpack_input(await _get_input(request, config))
         _add_tracing_info_to_metadata(config, request)
 
         async def _stream() -> AsyncIterator[dict]:
@@ -453,13 +462,13 @@ def add_routes(
         # Request is first validated using InvokeRequest which takes into account
         # config_keys as well as input_type.
         # After validation, the input is loaded using LangChain's load function.
-        input_ = _unpack_input(stream_log_request.input)
         config = _unpack_config(
             config_hash,
             stream_log_request.config,
             keys=config_keys,
             model=ConfigPayload,
         )
+        input_ = _unpack_input(await _get_input(request, config))
         _add_tracing_info_to_metadata(config, request)
 
         async def _stream_log() -> AsyncIterator[dict]:
