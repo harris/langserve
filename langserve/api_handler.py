@@ -837,9 +837,9 @@ class APIHandler:
             # Unpack the input dynamically using the input schema of the runnable.
             # This takes into account changes in the input type when
             # using configuration.
-            schema = self._runnable.with_config(config).input_schema
-            input_ = schema.model_validate(body.input)
-            return config, _unpack_input(input_)
+            # schema = self._runnable.with_config(config).input_schema
+            # input_ = schema.model_validate(body.input)
+            return config, _unpack_input(body.input)
         except ValidationError as e:
             raise RequestValidationError(e.errors(), body=body)
 
